@@ -1,0 +1,253 @@
+#+startup: overview hidestars
+#+options: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline author:t
+#+options: broken-links:nil c:nil creator:nil d:(not "LOGBOOK") date:t e:t
+#+options: email:nil f:t inline:t num:t p:nil pri:nil prop:nil stat:t tags:t
+#+options: tasks:t tex:t timestamp:t title:t toc:nil todo:t |:t
+#+title: Day 1: caloric elves
+#+author: Nessdoor
+#+language: en
+#+select_tags: export
+#+exclude_tags: noexport
+#+creator: Emacs 28.1 (Org mode 9.5.2)
+#+cite_export:
+
+This file is accompanied by /tangled/ source files with the complete
+programs. If you happen to be reading this on Emacs, you can just execute the
+first code block of each task or tangle the source by yourself with =M-x
+org-babel-tangle= (bound by default to =C-c C-v t=).
+
+* First task
+The solution to this problem is a simple instance of mapping and reduction:
+- convert the input to a list of lists of numbers
+- reduce the inner lists to a single value
+- reduce the resulting list to the maximum value
+For efficiency, one can fuse the computations into a single pass.
+
+** Implementation
+This solution has been implemented in /Emacs Lisp/ (/Elisp/), a dialect of Lisp
+at the core of the Emacs text manipulation system. This language is tailored to
+the task of programming auxiliary functions for the interactive manipulation of
+textual data and the construction of pseudo-graphical interfaces, therefore it
+might be a little unwieldy for solving generic programming problems (although it
+is perfectly capable of doing so).
+
+The solution has been implemented as a function that, looping on the list of
+lines read from the file, converts them into numbers, groups them into per-elf
+lists, and then reduces these lists to their sum. Then, the maximum is
+calculated over the resulting list of sums. This is not the most efficient
+solution, as it is O(3n) (O(4n), actually, but that [[*Buffer intermezzo][doesn't seem to be my
+fault]]), but it is adequate.
+
+*** The idiosyncrasies of Emacs Lisp
+
+**** Lexical scoping
+If you ever cared about the theory of [[http://en.wikipedia.org/wiki/Scope_(computer_science)][scoping]], you have to remember that Elisp
+uses the infamous dynamic scoping, instead of the lexical scoping that
+contemporary programmers are used to. If you browse the Emacs mailing lists, you
+will find traces of a heated debate on the justifiability of this choice. Since
+I don't want to suffer from more headaches than I usually have, I enable lexical
+scoping[fn:1].
+#+name: task1
+#+begin_src emacs-lisp :tangle task1.el :noweb no-export
+  ;;; -*- lexical-binding: t; -*-
+
+  <<let-bind>>
+#+end_src
+
+**** Lisp-1 vs Lisp-2
+Since this code is supposed to run inside my long-running Emacs instance, I
+wanted to reduce namespace pollution to the minimum. Therefore, the necessary
+functions are defined as let-bound lambdas. In this case, only one combined
+map-reduce function, ~elf-sum~, is necessary:
+#+name: let-bind
+#+begin_src emacs-lisp :tangle no :noweb no-export
+  (let ((elf-sum
+         <<elf-sum-definition>>))
+    <<find-max>>)
+#+end_src
+
+This was already not trivial, at least for me. Coming from [[https://en.wikipedia.org/wiki/Racket_(programming_language)][Racket]], which is a
+dialect of [[https://en.wikipedia.org/wiki/Scheme_(programming_language)][Scheme]], and not having programmed in s-expressions for a long time, I
+had expected that binding the value of a lambda expression to a symbol, and then
+putting that symbol at the head of an s-expression, would have resulted in a
+function call:
+#+begin_src emacs-lisp :tangle no
+  (elf-sum ...)
+#+end_src
+Well, this doesn't work. I had the feeling that I knew what was going on, since
+the Elisp manual hints at it here and there (but, as far as I know, without
+dedicating a page to the issue), but you need to dig a little deeper in order to
+understand what's really going on. There are two big families of lisps, called
+Lisp-1 and Lisp-2. Scheme-derived languages usually belong to Lisp-1, while
+Elisp, being a descendant of [[https://en.wikipedia.org/wiki/Maclisp][Maclisp]], belongs to Lisp-2. In a Lisp-1 language,
+functions are treated like any other data object, so they can be bound to
+symbols and those symbols can then be used in place of function names[fn:2]. On
+the contrary, a symbol in a Lisp-2 language can be tough of as a data structure
+with two fields: one is assigned by forms that bind values (~let~, ~set~,...),
+while the other is assigned by forms that define variables (~defun~,...). This
+means that the namespaces of functions and "variables" are distinct, and a
+symbol may be bound to both a value and a function at the same time[fn:3]. Then,
+if you want to call a function that has been bound as a value, you have to do it
+through a special form like ~funcall~.
+
+**** Tail recursion, or lack thereof
+I love functional-style programming, so I usually ignore loops and implement
+bulk reductions as tail-recursive functions whenever possible and wherever it
+makes sense.
+
+Little did I know that tail call optimization is not a universal property of
+lisps.
+
+Elisp has no tail recursion optimization, exactly like its ancestor Maclisp, and
+Emacs places (reasonably enough) a hard limit on recursion depth. Therefore, the
+pass performed by ~elf-sum~ is implemented as a loop with mutating variables:
+~elf-calories~ is a list containing the caloric inventory for the elf that is
+currently being processed (that is, a paragraph in the input text),
+~all-calories~ is a list of numbers, each one corresponding to the sum of the
+caloric inventory of an elf that has already been processed, and ~lines~ is the
+list of lines that are yet to be processed. The loop continues as long as the
+list of lines is not empty (that is, as long as it is a cons-cell), and the
+function returns the value of ~all-calories~ upon exit.
+#+name: elf-sum-definition
+#+begin_src emacs-lisp :tangle no :noweb no-export
+  (lambda (elf-calories all-calories lines)
+    (while (consp lines)
+      <<loop-body>>)
+    all-calories)
+#+end_src
+
+*** The real deal
+Now, with a more solid understanding of Elisp, we can move on with the actual
+logic.
+
+**** List reduction
+First of all, the loop body scans line by line. There are two kinds of line in
+the input: a data line, containing a calorie value, and a separating empty
+line. If a separating line is encountered,
+#+begin_src emacs-lisp :tangle no :noweb-ref loop-body
+             ;; Inventory for this elf is complete
+             (if (string= (car lines) "")
+                 (progn
+#+end_src
+then we sum the caloric contents of the current elf's inventory and we prepend
+it to the global list,
+#+begin_src emacs-lisp :tangle no :noweb-ref loop-body
+                   ;; Sum and prepend calories of last elf to global calorie list
+                   (setq all-calories
+                         (cons (apply '+ elf-calories) all-calories))
+#+end_src
+we initialize a new inventory for the next elf and we move to the next line.
+#+begin_src emacs-lisp :tangle no :noweb-ref loop-body
+                   ;; Init new elf calories list
+                   (setq elf-calories '())
+                   (setq lines (cdr lines)))
+#+end_src
+
+If, instead, the line is a data line, we read it as a number and store it in the
+calorie list of the current elf, then we advance to the next line.
+#+begin_src emacs-lisp :tangle no :noweb-ref loop-body
+               ;; New calorie value
+               (progn
+                 ;; Read value and store in elf calories list
+                 (setq elf-calories
+                       (cons (string-to-number (car lines)) elf-calories))
+                 (setq lines (cdr lines))))
+#+end_src
+
+**** Finding the maximum
+Now, an application of ~elf-sum~ over the list of lines constituting the input
+gives us a list of the total caloric payload of each elf. Finding the maximum is
+just a matter of finding the maximum over such list:
+#+name: find-max
+#+begin_src emacs-lisp :tangle no :noweb no-export
+  (apply 'max
+         (funcall elf-sum '() '()
+                  (split-string
+                   <<input-as-str>>
+                   "\n")))
+#+end_src
+
+**** Buffer intermezzo
+Now, the last piece of the puzzle is: how do we actually read the input file? To
+my surprise, it seems that Elisp has no way of directly reading a file into a
+string. This is probably because, as I said at the beginning, Elisp is tailored
+to interactive editing, and therefore, in order to load text from a file, we
+have to /open/ it as if we were about to edit its contents. Once opened, the
+content of a file are represented by a /buffer/ object[fn:4], which can then be
+converted into a more traditional string:
+#+name: input-as-str
+#+begin_src emacs-lisp :tangle no
+                     (with-temp-buffer
+                       (insert-file-contents-literally "input1.txt")
+                       (buffer-substring-no-properties (point-min) (point-max)))
+#+end_src
+
+~insert-file-contents-literally~ is one of the simplest ways in which we can
+read data from a file into a buffer. The =literally= part means that the data
+stream is interpreted as a stream of bytes, as Emacs might try to load it as a
+multibyte character-encoded text file.
+
+~buffer-substring-no-properties~ copies the contents of the buffer between a
+starting position (in this case ~point-min~, which is the beginning of the
+buffer) and an ending position (~point-max~ represents the end of the
+buffer). Once again, since Elisp is designed for implementing text editor macros
+(you know why Emacs is called like that, right?), text in a buffer can have
+/properties/, like font, coloration, etc. The =no-properties= means to not copy
+these properties into the string, otherwise we would be obtaining a string with
+[[info:elisp#Text Props and
+ Strings][a slightly different morphology]] that is much more difficult to parse.
+
+Passing through this intermediate step of reading into a buffer and then
+converting this into a string is a little inefficient, as the input has to be
+scanned entirely just to make it easier to process programmatically. This copy
+can be avoided by scripting operations on the buffer itself, moving the /point/
+around, reading line by line, and fusing this with the reduction operation. But
+for now, let's keep things simple.
+
+* Second task
+This is a simple variation of the first task where, instead of taking the
+maximum value, we take the first three. This can easily be done by first sorting
+the global list of calories, extracting the topmost three values, and summing
+them together.
+
+** Implementation
+We can just reuse most of the code from the previous task:
+#+name: task2
+#+begin_src emacs-lisp :tangle task2.el :noweb no-export
+  ;;; -*- lexical-binding: t; -*-
+
+  (let ((elf-sum
+         <<elf-sum-definition>>))
+    <<find-3-max>>)
+#+end_src
+
+The only difference is that, instead of finding the maximum value in the list,
+we sort the list, take the first three elements and sum them together:
+#+name: find-3-max
+#+begin_src emacs-lisp :tangle no :noweb no-export
+  (apply '+
+         (seq-take 
+          (sort
+           (funcall elf-sum '() '()
+                    (split-string
+                     <<input-as-str>>
+                     "\n"))
+           #'>)
+          3))
+#+end_src
+
+* Footnotes
+[fn:1] Using lexical binding is the recommended standard for new code, according
+to the [[info:elisp#Coding Conventions][offical Elisp programming tips]].
+
+[fn:2] To be pedantic, in a Lisp-1 function names /are/ symbols to which a value
+has been bound (in this case, a function object). There is no hard distinction
+between what could be called a /variable/ and a /function identifier/, which is
+something that people may be more intuitively used to.
+
+[fn:3] If you spend enough time customizing Emacs, you will easily find an
+example of such a symbol inside either stock Emacs or some package.
+
+[fn:4] Emacs uses [[https://en.wikipedia.org/wiki/Gap_buffer][gap buffers]] as the data structures for supporting efficient
+modification of long text streams. This is opposed to other popular choices,
+like arrays of lines (Vi) and ropes (Sublime).

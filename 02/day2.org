@@ -19,7 +19,7 @@ operations less tedious. Be sure to load or install them beforehand.
 This problem is a simple reduction, with rules encoded in a simple matcher that
 is slid across the input list.
 #+name: task1
-#+begin_src emacs-lisp :tangle task1.el :noweb no-export
+#+begin_src emacs-lisp :tangle task1.el :lexical yes :noweb no-export
   ;;; -*- lexical-binding: t; -*-
   <<library-imports>>
   <<slide-matcher>>

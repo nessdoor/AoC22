@@ -21,15 +21,15 @@ is slid across the input list.
 #+name: task1
 #+begin_src emacs-lisp :tangle task1.el :noweb no-export
   ;;; -*- lexical-binding: t; -*-
-  <<requires>>
-  <<exp1>>
+  <<library-imports>>
+  <<slide-matcher>>
 #+end_src
 
 ** Reading the input
 This time, we begin by reading the input. Last time, we saw that Elisp is not
 very ergonomic with file inputs. Let's try using a third-party library, this
 time: [[https://github.com/rejeep/f.el][f]].
-#+begin_src emacs-lisp :tangle no :noweb-ref requires
+#+begin_src emacs-lisp :tangle no :noweb-ref library-imports
   (require 'f)
 #+end_src
 Reading a string from a file is now much more direct:
@@ -64,10 +64,10 @@ is trivial, since we have native support for hash tables:
 
 ** Reducing moves to scores
 Now, we can just reduce the list of strings to the total score:
-#+name: exp1
+#+name: slide-matcher
 #+begin_src emacs-lisp :tangle no :noweb no-export
   (let ((ht
-         <<hasht>>))
+         <<hash-table-definition>>))
     ;; Sum scores for each round
     (seq-reduce
      (lambda (sum line)
@@ -97,7 +97,7 @@ Yes, there is a line of length 0. This is because the input has a closing =\n=,
 which produces a =""= string in the list. The laziest (and most efficient) way
 to address this issue is by including a mapping for =""= of value 0 in the
 lookup table:
-#+name: hasht
+#+name: hash-table-definition
 #+begin_src emacs-lisp :tangle no
   ;; Lookup table for round-to-score conversion
   #s(hash-table test equal
